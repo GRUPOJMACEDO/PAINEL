@@ -470,8 +470,12 @@ function computeCatsFromRows(rows, unit){
 }
 
 // ---------- SINCRONIZACAO (leitura publica, sem credenciais) ----------
-// Sempre busca uma copia nova, ignorando qualquer cache (navegador ou CDN),
-// tanto na sincronizacao automatica quanto no clique manual do botao.
+// Sempre busca uma copia nova, ignorando cache, tanto na sincronizacao
+// automatica quanto no clique manual do botao. IMPORTANTE: nao adicionar
+// headers customizados aqui (ex.: Cache-Control/Pragma) - o dominio
+// raw.githubusercontent.com nao responde corretamente ao preflight CORS
+// (OPTIONS) para headers fora da lista "simples", e a busca inteira falha.
+// O parametro unico na URL (abaixo) ja é suficiente para evitar cache.
 async function trySync(unit){
   const s = state[unit.id];
   let lastErr = null;
@@ -479,10 +483,7 @@ async function trySync(unit){
   for(const rawUrl of unit.raw){
     try{
       const sep = rawUrl.includes('?') ? '&' : '?';
-      const res = await fetch(`${rawUrl}${sep}_ts=${bust}`, {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-      });
+      const res = await fetch(`${rawUrl}${sep}_ts=${bust}`, { cache: 'no-store' });
       if(!res.ok){ lastErr = 'HTTP '+res.status; continue; }
       const text = await res.text();
       const rows = extractDataArray(text);
