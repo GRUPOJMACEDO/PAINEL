@@ -96,6 +96,8 @@
 
   .update-info.stale{ color:var(--danger); font-weight:800; }
   .update-info.stale .led{ background:var(--danger); box-shadow:0 0 8px var(--danger); }
+  .update-info.syncing .led{ animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.25; } }
 
   /* ---------- SUMMARY STRIP ---------- */
   .summary{
@@ -237,7 +239,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
         Sincronizar tudo
       </button>
-      <p class="sync-meta">Última sincronização do painel: <b id="globalSyncTime">—</b><br>Próxima atualização automática em <b id="autoRefreshCountdown">5:00</b></p>
+      <p class="sync-meta">Última sincronização do painel: <b id="globalSyncTime">—</b><br>Próxima atualização automática em <b id="autoRefreshCountdown">2:00</b></p>
     </div>
   </div>
 
@@ -350,7 +352,7 @@ const SHORTCUTS = [
 
 const STATUS_CONCLUIDO = 'Reparo Completo';
 const STALE_HOURS = 4; // acima disso, mostra em vermelho/negrito
-const AUTO_REFRESH_MINUTES = 5;
+const AUTO_REFRESH_MINUTES = 2;
 
 // state[id] = { lastUpdateRaw, lastUpdateDate, cats:[{label,count}], status:'idle'|'ok'|'error', note, source }
 let state = {};
@@ -468,14 +470,19 @@ function computeCatsFromRows(rows, unit){
 }
 
 // ---------- SINCRONIZACAO (leitura publica, sem credenciais) ----------
+// Sempre busca uma copia nova, ignorando qualquer cache (navegador ou CDN),
+// tanto na sincronizacao automatica quanto no clique manual do botao.
 async function trySync(unit){
   const s = state[unit.id];
   let lastErr = null;
-  const bust = Date.now(); // evita resposta em cache (CDN/navegador)
+  const bust = Date.now() + '_' + Math.random().toString(36).slice(2);
   for(const rawUrl of unit.raw){
     try{
       const sep = rawUrl.includes('?') ? '&' : '?';
-      const res = await fetch(`${rawUrl}${sep}_ts=${bust}`, {cache:'no-store'});
+      const res = await fetch(`${rawUrl}${sep}_ts=${bust}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
       if(!res.ok){ lastErr = 'HTTP '+res.status; continue; }
       const text = await res.text();
       const rows = extractDataArray(text);
@@ -502,21 +509,25 @@ async function trySync(unit){
 async function syncOne(id, btnEl){
   const unit = UNITS.find(u=>u.id===id);
   if(btnEl) btnEl.classList.add('spinning');
+  state[id].status = 'syncing';
+  render();
   const ok = await trySync(unit);
   render();
   if(btnEl) btnEl.classList.remove('spinning');
-  showToast(ok ? `${unit.name}: sincronizado.` : `${unit.name}: sincronização automática indisponível.`);
+  showToast(ok ? `${unit.name}: sincronizado agora.` : `${unit.name}: sincronização automática indisponível.`);
 }
 
 async function syncAll(){
   const btn = document.getElementById('syncAllBtn');
   btn.classList.add('spinning');
+  UNITS.forEach(u=>{ state[u.id].status = 'syncing'; });
+  render();
   const results = await Promise.all(UNITS.map(u=>trySync(u)));
   document.getElementById('globalSyncTime').textContent = fmtNow();
   render();
   btn.classList.remove('spinning');
   const okCount = results.filter(Boolean).length;
-  showToast(`Sincronização concluída: ${okCount}/${UNITS.length} unidades atualizadas automaticamente.`);
+  showToast(`Verificação concluída agora: ${okCount}/${UNITS.length} unidades checadas nos sites de origem.`);
 }
 
 // ---------- ICONS ----------
@@ -529,6 +540,7 @@ function svgArrow(){
 
 // ---------- RENDER ----------
 function statusInfo(s){
+  if(s.status === 'syncing') return {cls:'warn syncing', label: 'Verificando o site agora...'};
   if(s.status === 'ok'){
     if(!s.lastUpdateDate){
       return {cls:'warn', label: 'Sincronizado (site não informa data/hora da base)'};
